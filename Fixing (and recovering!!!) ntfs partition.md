@@ -120,3 +120,97 @@ Space conflict between the following two partitions
 *=Primary bootable  P=Primary  L=Logical  E=Extended  D=Deleted
 ```
 
+That really doesn't seem right... I'm pretty sure my first partition started at sector 2048, because that's the default of most tools I've seen. Let's take a look at what's actually at sector 2048:
+
+```bash
+2025-07-18 06:46:58 riley-server ~ » sudo dd if=/dev/sdg bs=512 skip=2048 count=1 | hexdump -C | head
+
+[sudo] password for riley:
+1+0 records in
+1+0 records out
+512 bytes copied, 0.000735739 s, 696 kB/s
+00000000  eb 52 90 4e 54 46 53 20  20 20 20 00 02 08 00 00  |.R.NTFS    .....|
+00000010  00 00 00 00 00 f8 00 00  3f 00 ff 00 00 08 00 00  |........?.......|
+00000020  00 00 00 00 80 00 80 00  f8 7f e0 e8 00 00 00 00  |................|
+00000030  00 00 0c 00 00 00 00 00  02 00 00 00 00 00 00 00  |................|
+00000040  f6 00 00 00 01 00 00 00  5f 78 85 0a ba 85 0a b6  |........_x......|
+00000050  00 00 00 00 fa 33 c0 8e  d0 bc 00 7c fb 68 c0 07  |.....3.....|.h..|
+00000060  1f 1e 68 66 00 cb 88 16  0e 00 66 81 3e 03 00 4e  |..hf......f.>..N|
+00000070  54 46 53 75 15 b4 41 bb  aa 55 cd 13 72 0c 81 fb  |TFSu..A..U..r...|
+00000080  55 aa 75 06 f7 c1 01 00  75 03 e9 dd 00 1e 83 ec  |U.u.....u.......|
+00000090  18 68 1a 00 b4 48 8a 16  0e 00 8b f4 16 1f cd 13  |.h...H..........|
+```
+
+Aha! That looks like the *actual* beginning of my partition. `eb 52 90` followed by ascii `NTFS` indicates the beginning of the boot sector. Fun fact: `eb 52 90` is actually the jump instruction telling the computer that is booting to skip over the Bios Parameter Block and on to the rest of the code needed to boot. [Here's some more info](https://thestarman.pcministry.com/asm/mbr/NTFSBR.htm)
+
+I think I know enough to recover my partition, but my curiosity got the better of me... So I dumped the first 100MB of the disk and opened it up in ImHex, my favorite hex editor.
+
+```
+2025-07-18 07:12:03 riley-server ~ » sudo dd if=/dev/sdg of=/media/riley/riley-storage/replacable/portable-drive-offload/disk-first-100mb.img bs=1024 count=100000
+```
+
+The first thing that caught my eye was the content of an old journal entry from circa 2015:
+
+```bash
+2025-07-18 04:29:21 riley-server replacable/portable-drive-offload » hexdump -C ./disk-first-100mb.img --skip 0x126000 --length $(( 16 * 6 )) # I wanted 6 lines and they are 16 bytes each!!!
+00126000  42 45 47 49 4e 3a 56 4e  4f 54 45 0d 0a 56 45 52  |BEGIN:VNOTE..VER|
+00126010  53 49 4f 4e 3a 31 2e 31  0d 0a 42 4f 44 59 3b 43  |SION:1.1..BODY;C|
+00126020  48 41 52 53 45 54 3d 55  54 46 2d 38 3b 45 4e 43  |HARSET=UTF-8;ENC|
+00126030  4f 44 49 4e 47 3d 51 55  4f 54 45 44 2d 50 52 49  |ODING=QUOTED-PRI|
+00126040  4e 54 41 42 4c 45 3a 54  6f 64 61 79 20 49 20 6d  |NTABLE:Today I m|
+00126050  65 74 20 77 69 74 68 20  54 6f 6e 79 20 61 67 61  |et with Tony aga|
+```
+
+I thought this was odd... Is NTFS really so simple that the content of a file is just exposed to the disk, raw? But I did some research and I found out that in NTFS, small files have their data stored directly in the MFT (Master File Table) record!!! So the data of a file is stored *as metadata*. Isn't that wild? This is called a "Resident File" and we can see here that this is a resident file because of the text `BEGIN:VNOTE` indicates that this is a resident file. Normal files, where the MFT just has a pointer to data, are called (conveniently) non-resident files.
+
+Okay, I want to explore more, but first let's get a working filesystem back.
+
+```bash
+2025-07-18 07:25:23 riley-server ~ » sudo parted /dev/sdg
+GNU Parted 3.5
+Using /dev/sdg
+Welcome to GNU Parted! Type 'help' to view a list of commands.
+(parted) mklabel msdos
+Warning: The existing disk label on /dev/sdg will be destroyed and all data on this disk will be lost. Do you want to
+continue?
+Yes/No? Yes
+(parted) mkpart primary ntfs 2048s 100%
+(parted) quit
+Information: You may need to update /etc/fstab.
+2025-07-18 07:26:36 riley-server ~ » sudo mount /dev/sdg1 /mnt/portable-drive
+2025-07-18 07:26:44 riley-server ~ » lsl /mnt/portable-drive
+total 6.0M
+drwxrwxrwx 1 root root  12K Jul 15 21:15  .
+drwxr-xr-x 1 root root  102 Jul 21 11:51  ..
+drwxrwxrwx 1 root root    0 May 23 21:19 '$RECYCLE.BIN'
+drwxrwxrwx 1 root root 4.0K Aug 29  2024  archive-old-as-of-2024-08-29
+drwxrwxrwx 1 root root 4.0K May 26 18:55 'AURORA I LOVE U'
+drwxrwxrwx 1 root root    0 Jun  8 20:51  backups
+-rwxrwxrwx 2 root root   56 Apr  9 16:12  .dropbox.device
+drwxrwxrwx 1 root root    0 May 23 22:18  msdownld.tmp
+drwxrwxrwx 1 root root 4.0K Jul  3 07:13  roms
+drwxrwxrwx 1 root root 4.0K Jan 11  2025  server-backups
+-rwxrwxrwx 1 root root 5.9M Jul  4 15:11  setup.exe
+drwxrwxrwx 1 root root 4.0K Apr  9 22:09 'System Volume Information'
+drwxrwxrwx 1 root root 4.0K Jul  2 17:15  Videos
+```
+
+There we are!!! All my files are back, right where I left them :) And everything is readable and intact:
+
+```
+2025-07-29 07:28:19 riley-server ~ » cat '/mnt/portable-drive/AURORA I LOVE U/README MY DARLING.txt'
+hello :3
+
+The folder "Avowed" contains your save games. This folder should be copied to: C:\Users\[Your Username]\Saved Games\Avowed.
+
+Note that you will just copy the "Avowed" folder from the portable hard drive to the "Saved Games" folder on your computer, like don't make another "Avowed" folder to put the "Avowed" folder from the portable hard drive into :P
+```
+
+Okay, I'm so excited about forensics now... what else can we play around with? Oh wait! I should actually properly fix the drive with `ntfsfix` first...
+
+
+
+Now we can play :) I wanna dump the MFT to disk and explore it a bit...
+
+
+
