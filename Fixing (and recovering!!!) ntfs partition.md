@@ -206,11 +206,92 @@ The folder "Avowed" contains your save games. This folder should be copied to: C
 Note that you will just copy the "Avowed" folder from the portable hard drive to the "Saved Games" folder on your computer, like don't make another "Avowed" folder to put the "Avowed" folder from the portable hard drive into :P
 ```
 
-Okay, I'm so excited about forensics now... what else can we play around with? Oh wait! I should actually properly fix the drive with `ntfsfix` first...
+Okay, I'm so excited about forensics now... what else can we play around with? Oh wait! I should actually properly fix the drive with `ntfsfix` first... Let's make sure that we supply the *partition* this time. Oh, and let's give it then `-n` (`--no-action`, do nothing) flag for good measure.
 
+```
+2025-08-17 16:21:19 riley-server ~ » sudo ntfsfix -n /dev/sda1                                                   1 ↵
+[sudo] password for riley:
+Mounting volume... OK
+Processing of $MFT and $MFTMirr completed successfully.
+Checking the alternate boot sector... OK
+NTFS volume version is 3.1.
+NTFS partition /dev/sda1 was processed successfully.
+```
 
+The drive is now at `/dev/sda` because I did a reboot since working on this project last :) Okay, perhaps we don't need to do anything? Running `ntfsfix` without `-n` gave me the same output. 
 
 Now we can play :) I wanna dump the MFT to disk and explore it a bit...
+
+```
+brew install sleuthkit # i am using linuxbrew
+pip install analyzeMFT
+```
+
+I know that my partition starts at sector 2048, so it's easy to produce an icat command:
+
+```
+sudo /home/linuxbrew/.linuxbrew/bin/icat -o 2048 /dev/sda 0 > /media/riley/riley-storage/replacable/portable-drive-offload/mft.raw
+```
+
+And convert it to something readable:
+
+```
+cd /media/riley/riley-storage/replacable/portable-drive-offload
+# analyzemft can produce a lot of output, let's store that for later review with 'tee'
+analyzemft -f ./mft.raw -o ./mft.csv | tee ./mftanalyze.log
+```
+
+Python is slow and nearly always sequential, so now is a good time for a smoke break...
+
+Exploring the csv shows we have quite a lot of attributes for each file:
+
+```
+2025-08-25 23:48:35 riley-server replacable/portable-drive-offload » head -1 mft.csv                                            1 ↵
+Record Number,Record Status,Record Type,File Type,Sequence Number,Parent Record Number,Parent Record Sequence Number,Filename,Filepath,SI Creation Time,SI Modification Time,SI Access Time,SI Entry Time,FN Creation Time,FN Modification Time,FN Access Time,FN Entry Time,Object ID,Birth Volume ID,Birth Object ID,Birth Domain ID,Has Standard Information,Has Attribute List,Has File Name,Has Volume Name,Has Volume Information,Has Data,Has Index Root,Has Index Allocation,Has Bitmap,Has Reparse Point,Has EA Information,Has EA,Has Logged Utility Stream,Attribute List Details,Security Descriptor,Volume Name,Volume Information,Data Attribute,Index Root,Index Allocation,Bitmap,Reparse Point,EA Information,EA,Logged Utility Stream,MD5,SHA256,SHA512,CRC32
+```
+
+Even checksums? I didn't know ntfs stored file checksums.
+
+It looks like the first file I ever created, besides the system-created things like the MFT and the folders I wanted, was an `.odt` file with the name `2015-07-07.odt`
+
+```
+63   Valid     In Use    File 1    62   0    2015-7-7.odt        2016-11-04T23:44:20.689Z 2015-07-09T00:03:02.000Z 2016-11-04T23:44:20.689Z 2016-11-04T23:44:20.689Z 2016-11-04T23:44:20.689Z 2016-11-04T23:44:20.689Z 2016-11-04T23:44:20.689Z 2016-11-04T23:44:20.689Z                     TRUE FALSE     TRUE FALSE     FALSE     TRUE FALSE     FALSE     FALSE     FALSE     FALSE     FALSE     FALSE     []   None      None {'name': '', 'non_resident': True, 'content_size': None, 'start_vcn': 0, 'last_vcn': 22}  None None None None None None None                
+```
+
+The cool thing about having the mft is that we can open files by record number (similar to inode number in ext filesystems used by linux). Let's recover that:
+
+```
+2025-08-26 00:00:38 riley-server replacable/portable-drive-offload » sudo /home/linuxbrew/.linuxbrew/bin/icat -o 2048 /dev/sda 63 > recovered-files/2015-7-7.odt
+```
+
+Notice the "63" as an argument to icat: that is where you supply the record number: `icat -o 2048 /dev/sda 63`
+
+On opening that file I discovered it was a journal entry about something VERY traumatic that happened to me, so I will not be sharing the contents here. But that's a cool thing to recover!!!
+
+After that was a bunch of `.vrt` files, and I don't know what that is. I have an inkling they were also automatically generated. But the second oldest file was a README!
+
+```
+119  Valid     In Use    File 1    64   0    00 README.txt       2016-11-04T23:44:23.934Z 2015-12-07T18:37:38.000Z 2016-11-04T23:44:23.934Z 2016-11-04T23:44:23.934Z 2016-11-04T23:44:23.934Z 2016-11-04T23:44:23.934Z 2016-11-04T23:44:23.934Z 2016-11-04T23:44:23.934Z                     TRUE FALSE     TRUE FALSE     FALSE     TRUE FALSE     FALSE     FALSE     FALSE     FALSE     FALSE     FALSE     []   None      None {'name': '', 'non_resident': False, 'content_size': 30, 'start_vcn': None, 'last_vcn': None}   None None None None None None None                
+```
+
+Let's recover that...
+
+```
+2025-08-26 00:01:08 riley-server replacable/portable-drive-offload » sudo /home/linuxbrew/.linuxbrew/bin/icat -o 2048 /dev/sda 119 > 'recovered-files/00 README.md'
+```
+
+And explore:
+
+```
+2025-08-26 00:08:25 riley-server replacable/portable-drive-offload » cat 'recovered-files/00 README.md'
+read these files as plain text%
+```
+
+Well, that was disappointing lol. But you see how we can use the mft to recover files from an ntfs partition!!! This may even be possible on a borked filesystem, but I'm not going to try that today. I need to wipe this drive and repurpose it for timemachine backups. It's old, but it will not be used frequently and I hope it will last a few more years.
+
+See ya!
+
+Cuddles
 
 
 
