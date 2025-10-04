@@ -1,3 +1,5 @@
+2025-09-25
+
 Directory	Content
 bin			Essential command binaries
 boot		Static files of the boot loader
@@ -21,6 +23,8 @@ opt			Add-on application software packages
 
 The root partition / must always physically contain /etc, /bin, /sbin, /lib, /dev and /usr, otherwise you won't be able to boot. This means that you should provide at least 700–850MB of disk space for the root partition including /usr, or 5–6GB for a workstation or a server installation.
 
+source: https://www.debian.org/releases/stable/amd64/apcs02.en.html
+
 
 must stay on /:
 
@@ -34,7 +38,7 @@ usr
 
 what remians:
 
-boot	subvolume
+boot	separate ext4 partition
 home	subvolume
 media	mount point, keep on /
 mnt		mount point, keep on /
