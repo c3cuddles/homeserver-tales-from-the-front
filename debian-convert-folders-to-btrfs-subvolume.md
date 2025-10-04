@@ -5,6 +5,14 @@
 Convert debian 13 server install with simple partitioning: one volume mounted at `/` into
 multiple subvolumes.
 
+## Motivation
+
+This will make it so we can snapshot `/` while excluding `/home`, `/var`, and
+`/tmp` from snapshots. This enables more reliable rollbacks, as we don't want
+to touch user files and `/var` and `/tmp` can cause issues if they are rolled
+back with `/` (trust me, I have learned this from experience trying to rollback
+my desktop running my first attempt at btrfs...)
+
 # What folders will become subvolumes?
 
 As a reminder, on debian:
