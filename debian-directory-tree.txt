@@ -1,0 +1,89 @@
+Directory	Content
+bin			Essential command binaries
+boot		Static files of the boot loader
+dev			Device files
+etc			Host-specific system configuration
+home		User home directories
+lib			Essential shared libraries and kernel modules
+media		Contains mount points for replaceable media
+mnt			Mount point for mounting a file system temporarily
+proc		Virtual directory for system information
+root		Home directory for the root user
+run			Run-time variable data
+sbin		Essential system binaries
+sys			Virtual directory for system information
+tmp			Temporary files
+usr			Secondary hierarchy
+var			Variable data
+srv			Data for services provided by the system
+opt			Add-on application software packages
+
+
+The root partition / must always physically contain /etc, /bin, /sbin, /lib, /dev and /usr, otherwise you won't be able to boot. This means that you should provide at least 700–850MB of disk space for the root partition including /usr, or 5–6GB for a workstation or a server installation.
+
+
+must stay on /:
+
+bin
+dev
+etc
+lib
+sbin
+usr
+
+
+what remians:
+
+boot	subvolume
+home	subvolume
+media	mount point, keep on /
+mnt		mount point, keep on /
+opt		subvolume
+proc	virtual, keep on /
+root	subvolume
+run		tmpfs, stored in RAM, keep on /
+srv 	subvolume
+sys		virtual, keep on /
+tmp		subvolume
+var		subvolume
+
+subvolumes:
+/							root
+/boot						boot
+/boot/grub2/x86_64-efi		boot-grub2-x86_64-efi		openSUSE separates this so that you can rollback without touching the bootloader. I think we should do the same.
+/home						home
+/opt						opt
+/root						root-home
+/srv						srv
+/tmp						tmp						chattr +C
+/usr/local					usr-local
+/var						var						chattr +C
+
+snapshots:
+
+openSUSE only snapshots `/`, and that is the only subvolume that is rolled back if a rollback is requested. I think we should do the same. But it might be a good idea to snapshot /boot and /boot/grub2/<arch> as well? I don't know if I'll roll it back but it seems wise.
+
+Oh, we should definitely snapshot /boot. OpenSUSE includes /boot in their snapshots, as besides the architecture-specific directories, it is just part of the @/ subvolume. So it gets rolled back as well.
+
+**IMPORTANT NOTE ON NODATACOW:**
+
+`nodatacow` is a filesystem-specific option. These options apply to all subvolumes:
+
+    Subvolumes belong to a single filesystem and, as implemented now, all share the same specific mount options. Also, changes done by remount have immediate effect. This may change in the future.
+
+(from the [btrfs readthedocs page](https://btrfs.readthedocs.io/en/latest/Subvolumes.html#mount-options))
+
+this means if you mount one subvolume with "nodatacow", the entire btrfs pool has "nodatacow" enabled.
+
+To get around this, apply "nodatacow" on a per-folder basis:
+
+```
+sudo chattr +C /tmp
+```
+
+from [the chattr man page](https://www.man7.org/linux/man-pages/man1/chattr.1.html):
+    C A file with the 'C' attribute set will not be subject to copy-on-write updates.
+
+also note that disabling CoW disables compression and checksumming as well
+
+you can use `lsattr /path/to/file` to confirm attributes
